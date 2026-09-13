@@ -544,7 +544,7 @@ func TestReconcileInvalidServiceNameSurfacesConditionWithoutRequeue(t *testing.T
 		},
 		Spec: sandboxv1beta1.SandboxSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{
-				Service: ptr.To(true),
+				Service: ptr.To(true), // nolint:modernize
 				PodTemplate: sandboxv1beta1.PodTemplate{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{{Name: "main"}},
