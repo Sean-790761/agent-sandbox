@@ -27,6 +27,7 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 	"sigs.k8s.io/agent-sandbox/internal/version"
 )
 
@@ -124,6 +125,30 @@ func TestSandboxClaimCreationRecording(t *testing.T) {
 			if testutil.CollectAndCount(SandboxClaimCreationTotal) != 1 {
 				t.Errorf("Expected 1 observation")
 			}
+		})
+	}
+}
+
+func TestNormalizeReadyReason(t *testing.T) {
+	testCases := []struct {
+		name   string
+		reason string
+		want   string
+	}{
+		{"known dependencies ready", sandboxv1beta1.SandboxReasonDependenciesReady, "DependenciesReady"},
+		{"known dependencies not ready", sandboxv1beta1.SandboxReasonDependenciesNotReady, "DependenciesNotReady"},
+		{"known invalid configuration", sandboxv1beta1.SandboxReasonInvalidConfiguration, "InvalidConfiguration"},
+		{"known multiple pods", sandboxv1beta1.SandboxReasonMultiplePods, "MultiplePods"},
+		{"known suspended", sandboxv1beta1.SandboxReasonSuspended, "SandboxSuspended"},
+		{"known expired", sandboxv1beta1.SandboxReasonExpired, "SandboxExpired"},
+		{"reconciler error literal", "ReconcilerError", "ReconcilerError"},
+		{"empty reason maps to Unknown", "", "Unknown"},
+		{"unexpected reason maps to Other", "SomethingBrandNew", "Other"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, NormalizeReadyReason(tc.reason))
 		})
 	}
 }

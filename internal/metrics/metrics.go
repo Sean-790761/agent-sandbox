@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 	"sigs.k8s.io/agent-sandbox/internal/version"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
@@ -142,6 +143,12 @@ var (
 	// Labels:
 	// - namespace: the namespace of the sandbox
 	// - ready_condition: "true" | "false"
+	// - reason: the normalized Ready-condition reason, so a permanently stuck Sandbox
+	//   (e.g. "InvalidConfiguration", "MultiplePods", "ReconcilerError") is distinguishable
+	//   from one still provisioning ("DependenciesNotReady") or intentionally suspended
+	//   ("SandboxSuspended"). Bounded to the enum returned by NormalizeReadyReason:
+	//   the known SandboxReason* values plus "ReconcilerError", "Unknown" (Ready condition
+	//   not yet present), and "Other" (any unexpected reason).
 	// - expired: "true" | "false"
 	// - launch_type: "warm" | "cold"
 	// - sandbox_template: sandboxTemplateRef, or "unknown" when the Sandbox carries no template annotation.
@@ -152,7 +159,7 @@ var (
 	AgentSandboxesDesc = prometheus.NewDesc(
 		"agent_sandboxes",
 		"Monitor the point-in-time number of sandboxes in the cluster.",
-		[]string{"namespace", "ready_condition", "expired", "launch_type", "sandbox_template", "owned_by", "created_by"},
+		[]string{"namespace", "ready_condition", "reason", "expired", "launch_type", "sandbox_template", "owned_by", "created_by"},
 		nil,
 	)
 
@@ -222,6 +229,30 @@ func NormalizeCreatedBy(createdBy string) string {
 		return createdBy
 	default:
 		return "unknown"
+	}
+}
+
+// NormalizeReadyReason maps a Sandbox Ready-condition reason to a bounded set of
+// values for the agent_sandboxes "reason" label. Reasons derived from apiserver or
+// user input must stay bounded (see the metrics cardinality rule in AGENTS.md), so
+// only known reasons pass through; an empty reason (Ready condition not yet present)
+// becomes "Unknown" and anything unexpected collapses to "Other".
+func NormalizeReadyReason(reason string) string {
+	switch reason {
+	case sandboxv1beta1.SandboxReasonDependenciesReady,
+		sandboxv1beta1.SandboxReasonDependenciesNotReady,
+		sandboxv1beta1.SandboxReasonMultiplePods,
+		sandboxv1beta1.SandboxReasonInvalidConfiguration,
+		sandboxv1beta1.SandboxReasonSuspended,
+		sandboxv1beta1.SandboxReasonExpired,
+		sandboxv1beta1.SandboxReasonPodSucceeded,
+		sandboxv1beta1.SandboxReasonPodFailed,
+		"ReconcilerError":
+		return reason
+	case "":
+		return "Unknown"
+	default:
+		return "Other"
 	}
 }
 
