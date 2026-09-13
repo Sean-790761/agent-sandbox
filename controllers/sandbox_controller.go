@@ -466,6 +466,7 @@ func (r *SandboxReconciler) recordMultiplePodsEvent(sandbox *sandboxv1beta1.Sand
 		return
 	}
 	r.Recorder.Eventf(sandbox, nil, corev1.EventTypeWarning, sandboxv1beta1.SandboxReasonMultiplePods, "Reconciling", "%s", err.Error())
+	asmetrics.RecordSandboxReconcileError("MultiplePods")
 }
 
 func (r *SandboxReconciler) computeConditions(sandbox *sandboxv1beta1.Sandbox, err error, svc *corev1.Service, pod *corev1.Pod, podErr error) []metav1.Condition {
@@ -758,6 +759,7 @@ func (r *SandboxReconciler) updateStatus(ctx context.Context, oldStatus *sandbox
 			// Sandbox was deleted mid-reconcile
 			return nil
 		}
+		asmetrics.RecordSandboxReconcileError("StatusUpdateFailed")
 		logger.Error(err, "Failed to patch sandbox status")
 		return err
 	}
@@ -1018,7 +1020,8 @@ func (r *SandboxReconciler) reconcileService(ctx context.Context, sandbox *sandb
 			}
 			err := r.Create(ctx, service, client.FieldOwner(sandboxControllerFieldOwner))
 			if err != nil {
-				logger.Error(err, "Failed to create", "Service.Namespace", service.Namespace, "Service.Name", service.Name)
+				asmetrics.RecordSandboxReconcileError("ServiceCreateFailed")
+		logger.Error(err, "Failed to create", "Service.Namespace", service.Namespace, "Service.Name", service.Name)
 				return nil, err
 			}
 			r.setServiceStatus(sandbox, service)
@@ -1460,6 +1463,7 @@ func (r *SandboxReconciler) reconcilePod(ctx context.Context, sandbox *sandboxv1
 			}
 			return reconcileExistingPod(existingPod)
 		}
+		asmetrics.RecordSandboxReconcileError("PodCreateFailed")
 		logger.Error(err, "Failed to create", "Pod.Namespace", pod.Namespace, "Pod.Name", pod.Name)
 		return nil, err
 	}
@@ -1692,7 +1696,8 @@ func (r *SandboxReconciler) reconcilePVCs(ctx context.Context, sandbox *sandboxv
 			return fmt.Errorf("SetControllerReference for PVC failed: %w", err)
 		}
 		if err := r.Create(ctx, pvc, client.FieldOwner(sandboxControllerFieldOwner)); err != nil {
-			logger.Error(err, "Failed to create PVC", "PVC.Namespace", sandbox.Namespace, "PVC.Name", pvcName)
+			asmetrics.RecordSandboxReconcileError("PVCCreateFailed")
+		logger.Error(err, "Failed to create PVC", "PVC.Namespace", sandbox.Namespace, "PVC.Name", pvcName)
 			return err
 		}
 	}

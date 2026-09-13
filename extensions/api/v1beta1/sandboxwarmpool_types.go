@@ -89,6 +89,25 @@ type SandboxWarmPoolUpdateStrategy struct {
 	Type SandboxWarmPoolUpdateStrategyType `json:"type,omitempty"`
 }
 
+// Warm pool condition types.
+const (
+	// SandboxWarmPoolConditionAvailable indicates whether the pool has enough ready
+	// sandboxes to satisfy spec.replicas (or desired is zero).
+	SandboxWarmPoolConditionAvailable = "Available"
+	// SandboxWarmPoolConditionProgressing indicates whether the pool is making
+	// progress toward the desired replica count. It becomes False when the pool
+	// is held (for example unschedulable sandboxes past the readiness grace period).
+	SandboxWarmPoolConditionProgressing = "Progressing"
+)
+
+// Warm pool condition reasons.
+const (
+	SandboxWarmPoolReasonMinimumReplicasAvailable   = "MinimumReplicasAvailable"
+	SandboxWarmPoolReasonMinimumReplicasUnavailable = "MinimumReplicasUnavailable"
+	SandboxWarmPoolReasonProgressing                = "WarmPoolProgressing"
+	SandboxWarmPoolReasonNotProgressing             = "WarmPoolNotProgressing"
+)
+
 // SandboxWarmPoolStatus defines the observed state of SandboxWarmPool.
 type SandboxWarmPoolStatus struct {
 	// replicas is the total number of sandboxes in the pool.
@@ -111,6 +130,15 @@ type SandboxWarmPoolStatus struct {
 	// +optional
 	// +kubebuilder:validation:Minimum=0
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// conditions represent the latest available observations of the warm pool's state.
+	// Known condition types are Available and Progressing.
+	// +optional
+	// +listType=map
+	// +listMapKey=type
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
 }
 
 // +genclient
@@ -118,6 +146,7 @@ type SandboxWarmPoolStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:subresource:scale:specpath=.spec.replicas,statuspath=.status.replicas,selectorpath=.status.selector
 // +kubebuilder:resource:scope=Namespaced,shortName=swp
+// +kubebuilder:printcolumn:name="Available",type="string",JSONPath=".status.conditions[?(@.type==\"Available\")].status"
 // +kubebuilder:printcolumn:name="Ready",type="integer",JSONPath=".status.readyReplicas"
 // +kubebuilder:printcolumn:name="Desired",type="integer",JSONPath=".spec.replicas"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"

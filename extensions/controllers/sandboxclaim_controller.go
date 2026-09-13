@@ -841,8 +841,16 @@ func (r *SandboxClaimReconciler) computeAndSetStatus(claim *extensionsv1beta1.Sa
 	if sandbox == nil && errors.Is(err, errSandboxAlreadyExists) && claim.Status.SandboxStatus.Name != "" {
 		return
 	}
+	prevReady := meta.FindStatusCondition(claim.Status.Conditions, string(v1beta1.SandboxConditionReady))
 	readyCondition := r.computeReadyCondition(claim, sandbox, err, isClaimExpired)
 	meta.SetStatusCondition(&claim.Status.Conditions, readyCondition)
+	// Count only transitions into a durable Ready=False reason so steady-state
+	// stuck claims do not inflate the counter every reconcile.
+	if readyCondition.Status == metav1.ConditionFalse && asmetrics.ShouldRecordClaimReconcileError(readyCondition.Reason) {
+		if prevReady == nil || prevReady.Status != metav1.ConditionFalse || prevReady.Reason != readyCondition.Reason {
+			asmetrics.RecordClaimReconcileError(readyCondition.Reason)
+		}
+	}
 	r.syncFinishedCondition(claim, sandbox, isClaimExpired)
 
 	if sandbox != nil {

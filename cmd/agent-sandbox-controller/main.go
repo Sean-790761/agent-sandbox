@@ -379,6 +379,8 @@ func main() {
 
 	// Register the custom Sandbox metric collector globally.
 	asmetrics.RegisterSandboxCollector(mgr.GetClient(), mgr.GetLogger().WithName("sandbox-collector"))
+	asmetrics.RegisterClaimCollector(mgr.GetClient(), mgr.GetLogger().WithName("claim-collector"))
+	asmetrics.RegisterWarmPoolCollector(mgr.GetClient(), mgr.GetLogger().WithName("warmpool-collector"))
 
 	// RequeueAfter-based write deferral for the Sandbox controller's
 	// recoverable metadata-only writes. Default (0) is fully synchronous:
@@ -466,6 +468,7 @@ func main() {
 			MaxBatchSize:                 sandboxWarmPoolMaxBatchSize,
 			EnableWarmPoolEviction:       enableWarmPoolEviction,
 			Recorder:                     mgr.GetEventRecorder("sandboxwarmpool-controller"),
+			Tracer:                       instrumenter,
 			ReplenishDelay:               sandboxWarmPoolReplenishDelay,
 			MaxRefillRate:                sandboxWarmPoolMaxRefillRate,
 			ReadinessGracePeriod:         sandboxWarmPoolReadinessGracePeriod,

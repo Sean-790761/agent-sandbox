@@ -1,0 +1,22 @@
+# Example ServiceMonitor for the agent-sandbox-controller metrics endpoint.
+#
+# Requires prometheus-operator (monitoring.coreos.com/v1). Adjust metadata.labels
+# so your Prometheus instance's serviceMonitorSelector matches.
+#
+# Helm users can instead set metrics.serviceMonitor.enabled=true.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: agent-sandbox-controller
+  namespace: agent-sandbox-system
+  labels:
+    app: agent-sandbox-controller
+spec:
+  selector:
+    matchLabels:
+      app: agent-sandbox-controller
+  endpoints:
+    - port: metrics
+      path: /metrics
+      scheme: http
+      interval: 30s

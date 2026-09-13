@@ -30,6 +30,11 @@ const (
 	LaunchTypeCold    = "cold"    // Pod not from a SandboxWarmPool
 	LaunchTypeUnknown = "unknown" // Used when Sandbox is nil during failure
 
+	// UnknownTemplateSentinel is the sandbox_template label value used when a
+	// Sandbox or Claim carries no template annotation. All controller metrics
+	// use this sentinel so series can join across metric families.
+	UnknownTemplateSentinel = "__unknown__"
+
 	// ClientAnnotation is the annotation key for the client request time.
 	ClientAnnotation = "agents.x-k8s.io/client-first-requested-at"
 
@@ -144,15 +149,81 @@ var (
 	// - ready_condition: "true" | "false"
 	// - expired: "true" | "false"
 	// - launch_type: "warm" | "cold"
-	// - sandbox_template: sandboxTemplateRef, or "unknown" when the Sandbox carries no template annotation.
-	//   Note this sentinel differs from the "__unknown__" the SandboxClaim metrics use, so the two
-	//   families do not join on sandbox_template for templateless Sandboxes.
+	// - sandbox_template: sandboxTemplateRef, or "__unknown__" when the Sandbox carries no template annotation.
 	// - owned_by: "SandboxClaim" | "SandboxWarmPool" | "None".
 	// - created_by: the component that created the sandbox (e.g. "go-client", "python-client", "controller", "unknown").
 	AgentSandboxesDesc = prometheus.NewDesc(
 		"agent_sandboxes",
 		"Monitor the point-in-time number of sandboxes in the cluster.",
 		[]string{"namespace", "ready_condition", "expired", "launch_type", "sandbox_template", "owned_by", "created_by"},
+		nil,
+	)
+
+
+	// ClaimReconcileErrorsTotal counts SandboxClaim reconcile outcomes that leave
+	// Ready=False for a durable failure reason (not expected contention).
+	// Labels:
+	// - reason: allow-listed Ready condition reason (e.g. TemplateNotFound).
+	ClaimReconcileErrorsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "agent_sandbox_claim_reconcile_errors_total",
+			Help: "Total number of SandboxClaim reconcile failures by normalized Ready condition reason.",
+		},
+		[]string{"reason"},
+	)
+
+	// SandboxReconcileErrorsTotal counts Sandbox reconcile failures by normalized reason.
+	// Labels:
+	// - reason: allow-listed failure category (e.g. MultiplePods, PodCreateFailed, StatusUpdateFailed).
+	SandboxReconcileErrorsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "agent_sandbox_reconcile_errors_total",
+			Help: "Total number of Sandbox reconcile failures by normalized reason.",
+		},
+		[]string{"reason"},
+	)
+
+	// AgentSandboxClaimsDesc describes the agent_sandbox_claims inventory gauge.
+	// Labels:
+	// - namespace: claim namespace
+	// - ready_condition: "true" | "false"
+	// - reason: Ready condition reason (normalized), or "None" when Ready=True / unset
+	AgentSandboxClaimsDesc = prometheus.NewDesc(
+		"agent_sandbox_claims",
+		"Point-in-time count of SandboxClaims in the cluster.",
+		[]string{"namespace", "ready_condition", "reason"},
+		nil,
+	)
+
+	// AgentSandboxWarmPoolReplicasDesc is the desired replica count per warm pool.
+	AgentSandboxWarmPoolDesiredReplicasDesc = prometheus.NewDesc(
+		"agent_sandbox_warmpool_desired_replicas",
+		"Desired replica count (spec.replicas) for each SandboxWarmPool.",
+		[]string{"namespace", "warmpool", "sandbox_template"},
+		nil,
+	)
+
+	// AgentSandboxWarmPoolReplicasDesc is the observed replica count per warm pool.
+	AgentSandboxWarmPoolReplicasDesc = prometheus.NewDesc(
+		"agent_sandbox_warmpool_replicas",
+		"Observed replica count (status.replicas) for each SandboxWarmPool.",
+		[]string{"namespace", "warmpool", "sandbox_template"},
+		nil,
+	)
+
+	// AgentSandboxWarmPoolReadyReplicasDesc is the ready replica count per warm pool.
+	AgentSandboxWarmPoolReadyReplicasDesc = prometheus.NewDesc(
+		"agent_sandbox_warmpool_ready_replicas",
+		"Ready replica count (status.readyReplicas) for each SandboxWarmPool.",
+		[]string{"namespace", "warmpool", "sandbox_template"},
+		nil,
+	)
+
+	// AgentSandboxWarmPoolDeficitDesc is max(desired-ready, 0) per warm pool.
+	AgentSandboxWarmPoolDeficitDesc = prometheus.NewDesc(
+		"agent_sandbox_warmpool_deficit",
+		"Warm pool ready-replica deficit (max(desired-ready, 0)).",
+		[]string{"namespace", "warmpool", "sandbox_template"},
 		nil,
 	)
 
@@ -183,6 +254,8 @@ func init() {
 	metrics.Registry.MustRegister(ClientClaimStartupLatency)
 	metrics.Registry.MustRegister(SandboxCreationLatency)
 	metrics.Registry.MustRegister(SandboxClaimCreationTotal)
+	metrics.Registry.MustRegister(ClaimReconcileErrorsTotal)
+	metrics.Registry.MustRegister(SandboxReconcileErrorsTotal)
 	metrics.Registry.MustRegister(BuildInfo)
 }
 
@@ -229,4 +302,53 @@ func NormalizeCreatedBy(createdBy string) string {
 // The createdBy value is automatically normalized.
 func RecordSandboxClaimCreation(namespace, templateName, launchType, warmPoolName, podCondition, createdBy string) {
 	SandboxClaimCreationTotal.WithLabelValues(namespace, templateName, launchType, warmPoolName, podCondition, NormalizeCreatedBy(createdBy)).Inc()
+}
+
+// RecordClaimReconcileError increments the claim reconcile error counter for a
+// normalized Ready-condition reason. Unknown reasons map to "ReconcilerError".
+func RecordClaimReconcileError(reason string) {
+	ClaimReconcileErrorsTotal.WithLabelValues(NormalizeClaimErrorReason(reason)).Inc()
+}
+
+// NormalizeClaimErrorReason maps Ready-condition reasons onto a fixed allow-list.
+func NormalizeClaimErrorReason(reason string) string {
+	switch reason {
+	case "TemplateNotFound", "WarmPoolNotFound", "AdoptionConflict", "SandboxCreatePending",
+		"InvalidMetadata", "EnvVarsInjectionRejected", "VolumeClaimTemplatesError",
+		"ClaimExpired", "SandboxMissing", "SandboxExpired", "SandboxNotReady", "ReconcilerError":
+		return reason
+	case "":
+		return "ReconcilerError"
+	default:
+		return "ReconcilerError"
+	}
+}
+
+// ShouldRecordClaimReconcileError reports whether a Ready=False reason is a
+// durable failure worth counting (excludes expected contention and in-progress waits).
+func ShouldRecordClaimReconcileError(reason string) bool {
+	switch NormalizeClaimErrorReason(reason) {
+	case "AdoptionConflict", "SandboxCreatePending", "SandboxNotReady":
+		return false
+	default:
+		return true
+	}
+}
+
+// RecordSandboxReconcileError increments the sandbox reconcile error counter.
+func RecordSandboxReconcileError(reason string) {
+	SandboxReconcileErrorsTotal.WithLabelValues(NormalizeSandboxErrorReason(reason)).Inc()
+}
+
+// NormalizeSandboxErrorReason maps sandbox failure categories onto a fixed allow-list.
+func NormalizeSandboxErrorReason(reason string) string {
+	switch reason {
+	case "MultiplePods", "PodCreateFailed", "ServiceCreateFailed", "PVCCreateFailed",
+		"StatusUpdateFailed", "ReconcilerError":
+		return reason
+	case "":
+		return "ReconcilerError"
+	default:
+		return "ReconcilerError"
+	}
 }

@@ -28,6 +28,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/meta"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -49,6 +50,7 @@ import (
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 	sandboxcontrollers "sigs.k8s.io/agent-sandbox/controllers"
 	extensionsv1beta1 "sigs.k8s.io/agent-sandbox/extensions/api/v1beta1"
+	asmetrics "sigs.k8s.io/agent-sandbox/internal/metrics"
 )
 
 const (
@@ -117,6 +119,9 @@ type SandboxWarmPoolReconciler struct {
 	// Recorder emits pool-level Events (e.g. WarmPoolNotProgressing). May be
 	// nil (tests); all uses are nil-guarded.
 	Recorder events.EventRecorder
+	// Tracer starts per-reconcile spans when --enable-tracing is set. May be
+	// nil in tests; StartSpan is only called when non-nil.
+	Tracer asmetrics.Instrumenter
 
 	// expectations tracks in-flight sandbox creations/deletions per pool so a
 	// reconcile never re-creates toward the target off a cache that has not
@@ -440,6 +445,12 @@ func (r *SandboxWarmPoolReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		logger.Info("SandboxWarmPool is being deleted")
 		r.forgetPool(req.NamespacedName)
 		return ctrl.Result{}, nil
+	}
+
+	if r.Tracer != nil {
+		var end func()
+		ctx, end = r.Tracer.StartSpan(ctx, warmPool, "ReconcileSandboxWarmPool", nil)
+		defer end()
 	}
 
 	// Save old status for comparison
@@ -770,14 +781,17 @@ func (r *SandboxWarmPoolReconciler) reconcilePool(ctx context.Context, warmPool 
 	// unschedulable sandboxes past the readiness grace period cannot make
 	// progress toward spec.replicas until cluster capacity frees up; degrade
 	// visibly instead of churning.
+	notProgressingMsg := ""
 	if unschedulableReplicas > 0 {
-		r.setNotProgressing(warmPool, poolKey, true, fmt.Sprintf(
+		notProgressingMsg = fmt.Sprintf(
 			"%d/%d sandboxes are unschedulable past the %s readiness grace period; holding them instead of replacing (replacements would be equally unschedulable)",
-			unschedulableReplicas, desiredReplicas, r.readinessGracePeriod()))
+			unschedulableReplicas, desiredReplicas, r.readinessGracePeriod())
+		r.setNotProgressing(warmPool, poolKey, true, notProgressingMsg)
 		requeueAfter = minNonZeroDuration(requeueAfter, r.unschedulableRecheckInterval())
 	} else {
 		r.setNotProgressing(warmPool, poolKey, false, "")
 	}
+	r.syncWarmPoolConditions(warmPool, desiredReplicas, readyReplicas, unschedulableReplicas > 0, notProgressingMsg)
 
 	// Self-schedule the post-grace evaluation for not-yet-Ready sandboxes so
 	// the stuck-GC and the unschedulable-hold run on time even in a cluster
@@ -1406,4 +1420,43 @@ func slowStartBatch(ctx context.Context, count int, initialBatchSize int, fn fun
 	}
 
 	return successes, nil
+}
+
+// syncWarmPoolConditions updates Available and Progressing status conditions to
+// mirror replica health and any not-progressing hold (e.g. unschedulable members).
+func (r *SandboxWarmPoolReconciler) syncWarmPoolConditions(warmPool *extensionsv1beta1.SandboxWarmPool, desired, ready int32, notProgressing bool, notProgressingMsg string) {
+	availableStatus := metav1.ConditionTrue
+	availableReason := extensionsv1beta1.SandboxWarmPoolReasonMinimumReplicasAvailable
+	availableMsg := fmt.Sprintf("%d/%d sandboxes are Ready", ready, desired)
+	if desired > 0 && ready < desired {
+		availableStatus = metav1.ConditionFalse
+		availableReason = extensionsv1beta1.SandboxWarmPoolReasonMinimumReplicasUnavailable
+	}
+	meta.SetStatusCondition(&warmPool.Status.Conditions, metav1.Condition{
+		Type:               extensionsv1beta1.SandboxWarmPoolConditionAvailable,
+		Status:             availableStatus,
+		Reason:             availableReason,
+		Message:            availableMsg,
+		ObservedGeneration: warmPool.Generation,
+	})
+
+	progressingStatus := metav1.ConditionTrue
+	progressingReason := extensionsv1beta1.SandboxWarmPoolReasonProgressing
+	progressingMsg := "Warm pool is progressing toward the desired replica count"
+	if notProgressing {
+		progressingStatus = metav1.ConditionFalse
+		progressingReason = extensionsv1beta1.SandboxWarmPoolReasonNotProgressing
+		if notProgressingMsg != "" {
+			progressingMsg = notProgressingMsg
+		} else {
+			progressingMsg = "Warm pool is not progressing toward the desired replica count"
+		}
+	}
+	meta.SetStatusCondition(&warmPool.Status.Conditions, metav1.Condition{
+		Type:               extensionsv1beta1.SandboxWarmPoolConditionProgressing,
+		Status:             progressingStatus,
+		Reason:             progressingReason,
+		Message:            progressingMsg,
+		ObservedGeneration: warmPool.Generation,
+	})
 }

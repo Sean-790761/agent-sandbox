@@ -22,6 +22,7 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/go-logr/logr"
 	"go.opentelemetry.io/otel/trace"
@@ -82,6 +83,7 @@ func (c *Client) CreateSandbox(ctx context.Context, warmPoolName, namespace stri
 		namespace = defaultNamespace
 	}
 
+	start := time.Now()
 	sandboxOpts := c.opts
 	sandboxOpts.WarmPoolName = warmPoolName
 	sandboxOpts.Namespace = namespace
@@ -89,12 +91,15 @@ func (c *Client) CreateSandbox(ctx context.Context, warmPoolName, namespace stri
 
 	sb, err := New(ctx, sandboxOpts)
 	if err != nil {
+		observeCreateLatency(start, err)
 		return nil, err
 	}
 
 	if err := sb.Open(ctx); err != nil {
+		observeCreateLatency(start, err)
 		return nil, err
 	}
+	observeCreateLatency(start, nil)
 
 	key := Key{Namespace: namespace, ClaimName: sb.ClaimName()}
 	// The registry key is built from the server-assigned (GenerateName) claim
@@ -111,10 +116,13 @@ func (c *Client) GetSandbox(ctx context.Context, claimName, namespace string) (*
 	}
 	key := Key{Namespace: namespace, ClaimName: claimName}
 
+	start := time.Now()
+
 	c.mu.Lock()
 	existing := c.registry[key]
 	if existing != nil && existing.IsReady() {
 		c.mu.Unlock()
+		observeDiscoveryLatency(start, "cache", nil)
 		return existing, nil
 	}
 	// Evict stale handle atomically: we already know existing is nil or
@@ -131,15 +139,20 @@ func (c *Client) GetSandbox(ctx context.Context, claimName, namespace string) (*
 
 	// Verify claim exists and resolve sandbox name before constructing handle.
 	if err := c.k8s.verifyClaimExists(ctx, claimName, namespace, c.tracer, c.svcName); err != nil {
-		return nil, fmt.Errorf("sandbox: claim %q not found in %q: %w", claimName, namespace, err)
+		err = fmt.Errorf("sandbox: claim %q not found in %q: %w", claimName, namespace, err)
+		observeDiscoveryLatency(start, "reattach", err)
+		return nil, err
 	}
 	sandboxName, err := c.k8s.resolveSandboxName(ctx, claimName, namespace, sandboxOpts.SandboxReadyTimeout, c.tracer, c.svcName)
 	if err != nil {
-		return nil, fmt.Errorf("sandbox: failed to resolve sandbox for claim %q: %w", claimName, err)
+		err = fmt.Errorf("sandbox: failed to resolve sandbox for claim %q: %w", claimName, err)
+		observeDiscoveryLatency(start, "reattach", err)
+		return nil, err
 	}
 
 	sb, err := New(ctx, sandboxOpts)
 	if err != nil {
+		observeDiscoveryLatency(start, "reattach", err)
 		return nil, err
 	}
 
@@ -150,11 +163,14 @@ func (c *Client) GetSandbox(ctx context.Context, claimName, namespace string) (*
 	sb.mu.Unlock()
 
 	if err := sb.Open(ctx); err != nil {
-		return nil, fmt.Errorf("sandbox: failed to re-attach to claim %q in %q: %w", claimName, namespace, err)
+		err = fmt.Errorf("sandbox: failed to re-attach to claim %q in %q: %w", claimName, namespace, err)
+		observeDiscoveryLatency(start, "reattach", err)
+		return nil, err
 	}
 
 	// A concurrent GetSandbox/CreateSandbox for the same key may have installed
 	// a ready handle while we were attaching; adopt it if so.
+	observeDiscoveryLatency(start, "reattach", nil)
 	return c.trackOrAdoptRace(key, sb), nil
 }
 

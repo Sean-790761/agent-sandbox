@@ -129,9 +129,9 @@ func (c *SandboxCollector) Collect(ch chan<- prometheus.Metric) {
 			launchTypeStr = LaunchTypeWarm
 		}
 
-		sandboxTemplateStr := "unknown"
+		sandboxTemplateStr := UnknownTemplateSentinel
 		// If a user manually creates a Sandbox without a SandboxClaim, it won't have the
-		// SandboxTemplateRefAnnotation. The collector correctly handles this by defaulting to "unknown".
+		// SandboxTemplateRefAnnotation. The collector correctly handles this by defaulting to UnknownTemplateSentinel.
 		if template, ok := sandbox.Annotations[sandboxv1beta1.SandboxTemplateRefAnnotation]; ok && template != "" {
 			sandboxTemplateStr = template
 		}

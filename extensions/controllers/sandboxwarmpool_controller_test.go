@@ -28,6 +28,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -2962,4 +2963,33 @@ func TestReconcilePoolMaxRefillRate(t *testing.T) {
 		require.Zero(t, requeue, "replacement fits in the initial bucket")
 		require.Equal(t, 2, countOwned(t, r, warmPool))
 	})
+}
+
+func TestSyncWarmPoolConditions(t *testing.T) {
+	r := &SandboxWarmPoolReconciler{}
+	desired := int32(3)
+	warmPool := &extensionsv1beta1.SandboxWarmPool{
+		ObjectMeta: metav1.ObjectMeta{Name: "pool", Namespace: "default", Generation: 7},
+		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{Replicas: &desired},
+	}
+
+	r.syncWarmPoolConditions(warmPool, desired, 1, true, "held for unschedulable sandboxes")
+
+	available := meta.FindStatusCondition(warmPool.Status.Conditions, extensionsv1beta1.SandboxWarmPoolConditionAvailable)
+	require.NotNil(t, available)
+	require.Equal(t, metav1.ConditionFalse, available.Status)
+	require.Equal(t, extensionsv1beta1.SandboxWarmPoolReasonMinimumReplicasUnavailable, available.Reason)
+	require.Equal(t, int64(7), available.ObservedGeneration)
+
+	progressing := meta.FindStatusCondition(warmPool.Status.Conditions, extensionsv1beta1.SandboxWarmPoolConditionProgressing)
+	require.NotNil(t, progressing)
+	require.Equal(t, metav1.ConditionFalse, progressing.Status)
+	require.Equal(t, extensionsv1beta1.SandboxWarmPoolReasonNotProgressing, progressing.Reason)
+	require.Contains(t, progressing.Message, "unschedulable")
+
+	r.syncWarmPoolConditions(warmPool, desired, desired, false, "")
+	available = meta.FindStatusCondition(warmPool.Status.Conditions, extensionsv1beta1.SandboxWarmPoolConditionAvailable)
+	require.Equal(t, metav1.ConditionTrue, available.Status)
+	progressing = meta.FindStatusCondition(warmPool.Status.Conditions, extensionsv1beta1.SandboxWarmPoolConditionProgressing)
+	require.Equal(t, metav1.ConditionTrue, progressing.Status)
 }

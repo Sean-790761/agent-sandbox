@@ -8,6 +8,8 @@ description: >
 
 This guide covers the tools and techniques available for assessing the performance of Agent Sandbox — from tuning controller concurrency, to running load tests, to collecting and interpreting benchmark results.
 
+For the full catalog of controller Prometheus series (`agent_sandbox_*`), see the [Controller Metrics Reference](https://github.com/kubernetes-sigs/agent-sandbox/blob/main/docs/metrics.md).
+
 ## Controller Performance Tuning
 
 The `agent-sandbox-controller` exposes several flags that directly affect throughput and API server pressure. Raising these is the first step before running any load test. The table below is kept in sync with [`docs/configuration.md`](https://github.com/kubernetes-sigs/agent-sandbox/blob/main/docs/configuration.md), which is the canonical flag reference — check there first if the two ever disagree.

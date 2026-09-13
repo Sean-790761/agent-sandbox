@@ -212,3 +212,7 @@ kubectl -n agent-sandbox-system rollout restart deploy/agent-sandbox-controller
 Annotations in `additionalPodMetadata` are governed separately by a
 restricted-domain blocklist (with `cluster-autoscaler.kubernetes.io/safe-to-evict`
 exempted), not by this allowlist.
+
+## Metrics
+
+The controller metrics endpoint and `agent_sandbox_*` series are documented in [metrics.md](metrics.md).
