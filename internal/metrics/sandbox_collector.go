@@ -39,6 +39,7 @@ const (
 type AgentSandboxesMetricKey struct {
 	Namespace      string
 	ReadyCondition string
+	Reason         string
 	Expired        string
 	LaunchType     string
 	Template       string
@@ -54,6 +55,7 @@ func NewAgentSandboxesConstMetric(count int, key AgentSandboxesMetricKey) promet
 		float64(count),
 		key.Namespace,
 		key.ReadyCondition,
+		key.Reason,
 		key.Expired,
 		key.LaunchType,
 		key.Template,
@@ -114,6 +116,7 @@ func (c *SandboxCollector) Collect(ch chan<- prometheus.Metric) {
 	for _, sandbox := range sandboxList.Items {
 		readyConditionStr := "false"
 		expiredStr := "false"
+		reasonStr := NormalizeReadyReason("")
 		readyCond := meta.FindStatusCondition(sandbox.Status.Conditions, string(sandboxv1beta1.SandboxConditionReady))
 		if readyCond != nil {
 			if readyCond.Status == metav1.ConditionTrue {
@@ -122,6 +125,7 @@ func (c *SandboxCollector) Collect(ch chan<- prometheus.Metric) {
 			if readyCond.Reason == sandboxv1beta1.SandboxReasonExpired {
 				expiredStr = "true"
 			}
+			reasonStr = NormalizeReadyReason(readyCond.Reason)
 		}
 
 		launchTypeStr := LaunchTypeCold
@@ -154,6 +158,7 @@ func (c *SandboxCollector) Collect(ch chan<- prometheus.Metric) {
 		key := AgentSandboxesMetricKey{
 			Namespace:      sandbox.Namespace,
 			ReadyCondition: readyConditionStr,
+			Reason:         reasonStr,
 			Expired:        expiredStr,
 			LaunchType:     launchTypeStr,
 			Template:       sandboxTemplateStr,

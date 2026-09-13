@@ -57,6 +57,7 @@ func TestSandboxCollector(t *testing.T) {
 							{
 								Type:   string(sandboxv1beta1.SandboxConditionReady),
 								Status: metav1.ConditionTrue,
+								Reason: sandboxv1beta1.SandboxReasonDependenciesReady,
 							},
 						},
 					},
@@ -64,7 +65,7 @@ func TestSandboxCollector(t *testing.T) {
 			},
 			expectedCount: 1,
 			expectedLabels: map[string]int{
-				"created_by:unknown expired:false launch_type:cold namespace:default owned_by:None ready_condition:true sandbox_template:unknown": 1,
+				"created_by:unknown expired:false launch_type:cold namespace:default owned_by:None ready_condition:true reason:DependenciesReady sandbox_template:unknown": 1,
 			},
 		},
 		{
@@ -82,7 +83,7 @@ func TestSandboxCollector(t *testing.T) {
 			},
 			expectedCount: 1,
 			expectedLabels: map[string]int{
-				"created_by:unknown expired:false launch_type:cold namespace:default owned_by:None ready_condition:false sandbox_template:unknown": 1,
+				"created_by:unknown expired:false launch_type:cold namespace:default owned_by:None ready_condition:false reason:Unknown sandbox_template:unknown": 1,
 			},
 		},
 		{
@@ -100,7 +101,7 @@ func TestSandboxCollector(t *testing.T) {
 			},
 			expectedCount: 1,
 			expectedLabels: map[string]int{
-				"created_by:unknown expired:false launch_type:warm namespace:default owned_by:None ready_condition:false sandbox_template:unknown": 1,
+				"created_by:unknown expired:false launch_type:warm namespace:default owned_by:None ready_condition:false reason:Unknown sandbox_template:unknown": 1,
 			},
 		},
 		{
@@ -116,6 +117,7 @@ func TestSandboxCollector(t *testing.T) {
 							{
 								Type:   string(sandboxv1beta1.SandboxConditionReady),
 								Status: metav1.ConditionTrue,
+								Reason: sandboxv1beta1.SandboxReasonDependenciesReady,
 							},
 						},
 					},
@@ -172,9 +174,9 @@ func TestSandboxCollector(t *testing.T) {
 			},
 			expectedCount: 3, // We expect 3 distinct metric series for the 4 sandboxes
 			expectedLabels: map[string]int{
-				"created_by:unknown expired:false launch_type:cold namespace:default owned_by:None ready_condition:true sandbox_template:unknown":     1,
-				"created_by:unknown expired:true launch_type:warm namespace:test-ns owned_by:None ready_condition:false sandbox_template:my-template": 1,
-				"created_by:unknown expired:false launch_type:cold namespace:default owned_by:None ready_condition:false sandbox_template:unknown":    2,
+				"created_by:unknown expired:false launch_type:cold namespace:default owned_by:None ready_condition:true reason:DependenciesReady sandbox_template:unknown":  1,
+				"created_by:unknown expired:true launch_type:warm namespace:test-ns owned_by:None ready_condition:false reason:SandboxExpired sandbox_template:my-template": 1,
+				"created_by:unknown expired:false launch_type:cold namespace:default owned_by:None ready_condition:false reason:Unknown sandbox_template:unknown":           2,
 			},
 		},
 		{
@@ -199,6 +201,7 @@ func TestSandboxCollector(t *testing.T) {
 							{
 								Type:   string(sandboxv1beta1.SandboxConditionReady),
 								Status: metav1.ConditionTrue,
+								Reason: sandboxv1beta1.SandboxReasonDependenciesReady,
 							},
 						},
 					},
@@ -206,7 +209,7 @@ func TestSandboxCollector(t *testing.T) {
 			},
 			expectedCount: 1,
 			expectedLabels: map[string]int{
-				"created_by:unknown expired:false launch_type:cold namespace:default owned_by:SandboxClaim ready_condition:true sandbox_template:unknown": 1,
+				"created_by:unknown expired:false launch_type:cold namespace:default owned_by:SandboxClaim ready_condition:true reason:DependenciesReady sandbox_template:unknown": 1,
 			},
 		},
 		{
@@ -231,6 +234,7 @@ func TestSandboxCollector(t *testing.T) {
 							{
 								Type:   string(sandboxv1beta1.SandboxConditionReady),
 								Status: metav1.ConditionTrue,
+								Reason: sandboxv1beta1.SandboxReasonDependenciesReady,
 							},
 						},
 					},
@@ -238,7 +242,7 @@ func TestSandboxCollector(t *testing.T) {
 			},
 			expectedCount: 1,
 			expectedLabels: map[string]int{
-				"created_by:unknown expired:false launch_type:cold namespace:default owned_by:SandboxWarmPool ready_condition:true sandbox_template:unknown": 1,
+				"created_by:unknown expired:false launch_type:cold namespace:default owned_by:SandboxWarmPool ready_condition:true reason:DependenciesReady sandbox_template:unknown": 1,
 			},
 		},
 		{
@@ -266,6 +270,7 @@ func TestSandboxCollector(t *testing.T) {
 							{
 								Type:   string(sandboxv1beta1.SandboxConditionReady),
 								Status: metav1.ConditionTrue,
+								Reason: sandboxv1beta1.SandboxReasonDependenciesReady,
 							},
 						},
 					},
@@ -273,7 +278,7 @@ func TestSandboxCollector(t *testing.T) {
 			},
 			expectedCount: 1,
 			expectedLabels: map[string]int{
-				"created_by:unknown expired:false launch_type:cold namespace:default owned_by:SandboxWarmPool ready_condition:true sandbox_template:unknown": 1,
+				"created_by:unknown expired:false launch_type:cold namespace:default owned_by:SandboxWarmPool ready_condition:true reason:DependenciesReady sandbox_template:unknown": 1,
 			},
 		},
 		{
@@ -292,6 +297,7 @@ func TestSandboxCollector(t *testing.T) {
 							{
 								Type:   string(sandboxv1beta1.SandboxConditionReady),
 								Status: metav1.ConditionTrue,
+								Reason: sandboxv1beta1.SandboxReasonDependenciesReady,
 							},
 						},
 					},
@@ -299,7 +305,7 @@ func TestSandboxCollector(t *testing.T) {
 			},
 			expectedCount: 1,
 			expectedLabels: map[string]int{
-				"created_by:go-client expired:false launch_type:cold namespace:default owned_by:None ready_condition:true sandbox_template:unknown": 1,
+				"created_by:go-client expired:false launch_type:cold namespace:default owned_by:None ready_condition:true reason:DependenciesReady sandbox_template:unknown": 1,
 			},
 		},
 		{
@@ -318,6 +324,7 @@ func TestSandboxCollector(t *testing.T) {
 							{
 								Type:   string(sandboxv1beta1.SandboxConditionReady),
 								Status: metav1.ConditionTrue,
+								Reason: sandboxv1beta1.SandboxReasonDependenciesReady,
 							},
 						},
 					},
@@ -325,7 +332,7 @@ func TestSandboxCollector(t *testing.T) {
 			},
 			expectedCount: 1,
 			expectedLabels: map[string]int{
-				"created_by:python-client expired:false launch_type:cold namespace:default owned_by:None ready_condition:true sandbox_template:unknown": 1,
+				"created_by:python-client expired:false launch_type:cold namespace:default owned_by:None ready_condition:true reason:DependenciesReady sandbox_template:unknown": 1,
 			},
 		},
 		{
@@ -344,6 +351,7 @@ func TestSandboxCollector(t *testing.T) {
 							{
 								Type:   string(sandboxv1beta1.SandboxConditionReady),
 								Status: metav1.ConditionTrue,
+								Reason: sandboxv1beta1.SandboxReasonDependenciesReady,
 							},
 						},
 					},
@@ -351,7 +359,79 @@ func TestSandboxCollector(t *testing.T) {
 			},
 			expectedCount: 1,
 			expectedLabels: map[string]int{
-				"created_by:unknown expired:false launch_type:cold namespace:default owned_by:None ready_condition:true sandbox_template:unknown": 1,
+				"created_by:unknown expired:false launch_type:cold namespace:default owned_by:None ready_condition:true reason:DependenciesReady sandbox_template:unknown": 1,
+			},
+		},
+		{
+			name: "stuck sandbox with invalid configuration reason",
+			sandboxes: []runtime.Object{
+				&sandboxv1beta1.Sandbox{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "sandbox-invalid",
+						Namespace: "default",
+					},
+					Status: sandboxv1beta1.SandboxStatus{
+						Conditions: []metav1.Condition{
+							{
+								Type:   string(sandboxv1beta1.SandboxConditionReady),
+								Status: metav1.ConditionFalse,
+								Reason: sandboxv1beta1.SandboxReasonInvalidConfiguration,
+							},
+						},
+					},
+				},
+			},
+			expectedCount: 1,
+			expectedLabels: map[string]int{
+				"created_by:unknown expired:false launch_type:cold namespace:default owned_by:None ready_condition:false reason:InvalidConfiguration sandbox_template:unknown": 1,
+			},
+		},
+		{
+			name: "provisioning sandbox with dependencies-not-ready reason",
+			sandboxes: []runtime.Object{
+				&sandboxv1beta1.Sandbox{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "sandbox-provisioning",
+						Namespace: "default",
+					},
+					Status: sandboxv1beta1.SandboxStatus{
+						Conditions: []metav1.Condition{
+							{
+								Type:   string(sandboxv1beta1.SandboxConditionReady),
+								Status: metav1.ConditionFalse,
+								Reason: sandboxv1beta1.SandboxReasonDependenciesNotReady,
+							},
+						},
+					},
+				},
+			},
+			expectedCount: 1,
+			expectedLabels: map[string]int{
+				"created_by:unknown expired:false launch_type:cold namespace:default owned_by:None ready_condition:false reason:DependenciesNotReady sandbox_template:unknown": 1,
+			},
+		},
+		{
+			name: "suspended sandbox with suspended reason",
+			sandboxes: []runtime.Object{
+				&sandboxv1beta1.Sandbox{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "sandbox-suspended",
+						Namespace: "default",
+					},
+					Status: sandboxv1beta1.SandboxStatus{
+						Conditions: []metav1.Condition{
+							{
+								Type:   string(sandboxv1beta1.SandboxConditionReady),
+								Status: metav1.ConditionFalse,
+								Reason: sandboxv1beta1.SandboxReasonSuspended,
+							},
+						},
+					},
+				},
+			},
+			expectedCount: 1,
+			expectedLabels: map[string]int{
+				"created_by:unknown expired:false launch_type:cold namespace:default owned_by:None ready_condition:false reason:SandboxSuspended sandbox_template:unknown": 1,
 			},
 		},
 	}
