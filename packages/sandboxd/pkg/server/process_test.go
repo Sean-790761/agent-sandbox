@@ -532,3 +532,86 @@ func TestExecute_KillsGrandchildrenOnCancel(t *testing.T) {
 		return isProcessDead(grandchildPID)
 	}, 10*time.Second, 50*time.Millisecond, "grandchild process %d should have been killed", grandchildPID)
 }
+
+// TestShutdownProcessesTerminatesExecuteChildren verifies that daemon
+// shutdown also reaps in-flight Execute commands.
+//
+// Execute deliberately skips the process registry ("use a local done
+// channel since Execute does not register"). ShutdownProcesses only
+// SignalAlls the registry, so a long-running Execute survives the
+// shutdown sweep, blocks gRPC GracefulStop until --shutdown-timeout,
+// and only dies on the force-Stop fallback — if at all before the
+// timeout window.
+func TestShutdownProcessesTerminatesExecuteChildren(t *testing.T) {
+	skipIfGVisor(t)
+	root := t.TempDir()
+	srv, err := New(Options{RootDir: root, MetadataEnvPrefix: "SANDBOX_", Log: logr.Discard()})
+	require.NoError(t, err)
+
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	grpcServer := grpc.NewServer()
+	srv.RegisterGRPC(grpcServer)
+	go func() { _ = grpcServer.Serve(lis) }()
+	t.Cleanup(func() {
+		grpcServer.Stop()
+		_ = lis.Close()
+	})
+
+	conn, err := grpc.NewClient(lis.Addr().String(),
+		grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	client := processv1.NewProcessServiceClient(conn)
+
+	pidFile := filepath.Join(t.TempDir(), "execute.pid")
+	// Write the Execute child's OS PID, then sleep — mirrors how a stuck
+	// unary RPC holds the daemon open across ShutdownProcesses.
+	cmd := "echo $$ > " + pidFile + "; sleep 300"
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := client.Execute(ctx, &processv1.ExecuteRequest{
+			Config: &processv1.ProcessConfig{Command: []string{"sh", "-c", cmd}},
+		})
+		done <- err
+	}()
+
+	var childPID int
+	require.Eventually(t, func() bool {
+		data, err := os.ReadFile(pidFile)
+		if err != nil {
+			return false
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+		if err != nil || pid <= 0 {
+			return false
+		}
+		childPID = pid
+		return !isProcessDead(childPID)
+	}, 10*time.Second, 50*time.Millisecond, "Execute child PID file never populated")
+	t.Cleanup(func() {
+		if childPID > 0 {
+			_ = syscall.Kill(-childPID, syscall.SIGKILL)
+			_ = syscall.Kill(childPID, syscall.SIGKILL)
+		}
+	})
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer shutdownCancel()
+	srv.ShutdownProcesses(shutdownCtx)
+
+	require.Eventually(t, func() bool {
+		return isProcessDead(childPID)
+	}, 5*time.Second, 50*time.Millisecond,
+		"Execute child PID %d still alive after ShutdownProcesses (not in registry)", childPID)
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Execute did not return after shutdown")
+	}
+}
