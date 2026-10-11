@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+# Copyright 2026 The Kubernetes Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+
+_repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
+
+from dev.ci.shared.gvisor import apply_gvisor_runtime_class, prepare_gvisor_kind
+from dev.ci.shared.runner import TestRunner
+from dev.tools.shared import utils as tools_utils
+
+
+class GvisorE2ETestRunner(TestRunner):
+    def __init__(self):
+        super().__init__(
+            "e2e-gvisor",
+            "KIND e2e with gVisor RuntimeClass (optional, timing-diversity signal)",
+        )
+        self.parser.add_argument(
+            "--suite",
+            dest="suite",
+            help="kept for Prow/job-template compatibility; only Go RuntimeClass tests run",
+            type=str,
+            choices=["all", "tests", "benchmarks"],
+            default="tests",
+        )
+
+    def setup_cluster(self, args):
+        """Install runsc, create a gVisor-capable KIND cluster, deploy controller."""
+        _, kind_config = prepare_gvisor_kind(self.repo_root)
+        os.environ["KIND_CONFIG"] = kind_config
+        args.kind_config = kind_config
+
+        result = super().setup_cluster(
+            args,
+            extra_push_images_args=[
+                "--images",
+                "agent-sandbox-controller",
+                "sandbox-router",
+                "sandboxd",
+            ],
+        )
+        if result.returncode != 0:
+            return result
+
+        kubeconfig = os.path.join(self.repo_root, "bin", "KUBECONFIG")
+        try:
+            apply_gvisor_runtime_class(kubeconfig)
+        except RuntimeError as err:
+            print(str(err), file=sys.stderr)
+            return subprocess.CompletedProcess(args=[], returncode=1)
+        return result
+
+    def run_tests(self, args):
+        env = os.environ.copy()
+        env["SANDBOX_RUNTIME_CLASS"] = "gvisor"
+        env["KUBECONFIG"] = os.path.join(self.repo_root, "bin", "KUBECONFIG")
+
+        artifact_dir = env.get("ARTIFACTS") or os.path.join(self.repo_root, "bin")
+        os.makedirs(artifact_dir, exist_ok=True)
+
+        go_test_cmd = tools_utils.go_tool_args(
+            "gotestsum",
+            f"--junitfile={artifact_dir}/junit_e2e-gvisor.xml",
+            f"--jsonfile={artifact_dir}/test-e2e-gvisor.json",
+            "--",
+            "./test/e2e/extensions/",
+            "-run",
+            "TestRuntimeClassLifecycle|TestRuntimeClassStartupComparison",
+            "--parallel=1",
+            "-v",
+            "-count=1",
+            "-timeout=30m",
+        )
+        print(f"Running command: {' '.join(go_test_cmd)}")
+        print("SANDBOX_RUNTIME_CLASS=gvisor")
+        return subprocess.run(go_test_cmd, env=env, cwd=self.repo_root)
+
+
+if __name__ == "__main__":
+    runner = GvisorE2ETestRunner()
+    runner.main()

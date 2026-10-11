@@ -73,14 +73,20 @@ def main():
                         default=os.environ.get("CONTAINER_ENGINE", "docker"),
                         help="Container engine to use (docker or podman). "
                              "Also read from the CONTAINER_ENGINE env var.")
+    parser.add_argument("--config",
+                        default=os.environ.get("KIND_CONFIG"),
+                        help="Kind cluster config YAML replacing the generated default "
+                             "(also read from the KIND_CONFIG env var).")
     args = parser.parse_args()
-
-    # argparse choices only validates CLI-supplied values, not defaults from
-    # environment variables.  Explicitly validate the resolved value so a
-    # typo in CONTAINER_ENGINE fails fast instead of silently falling through.
     if args.container_engine not in ("docker", "podman"):
         sys.exit(f"ERROR: unsupported container engine {args.container_engine!r} "
                  "(choose docker or podman, or unset CONTAINER_ENGINE)")
+
+    external_config = None
+    if args.config:
+        external_config = os.path.abspath(args.config)
+        if not os.path.isfile(external_config):
+            sys.exit(f"ERROR: kind config not found: {external_config}")
 
     clusters = _kind_run(["kind", "get", "clusters"], args.container_engine,
                          capture_output=True, text=True).stdout.splitlines()
@@ -99,22 +105,28 @@ def main():
         print(f"Creating cluster '{args.name}'.")
 
         create_cmd = ["kind", "create", "cluster", "--name", args.name]
+        generated_config_path = None
 
-        # Create a temporary config file with kubelet verbosity and containerd settings
-        config_content = create_kind_config(args.kubelet_verbosity, args.containerd_loglevel)
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-            f.write(config_content)
-            config_path = f.name
+        if external_config:
+            print(f"Using external kind config: {external_config}")
+            create_cmd.extend(["--config", external_config])
+        else:
+            # Create a temporary config file with kubelet verbosity and containerd settings
+            config_content = create_kind_config(args.kubelet_verbosity, args.containerd_loglevel)
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+                f.write(config_content)
+                generated_config_path = f.name
 
-        print(f"Using kind config with kubelet verbosity: {args.kubelet_verbosity}")
-        create_cmd.extend(["--config", config_path])
+            print(f"Using kind config with kubelet verbosity: {args.kubelet_verbosity}")
+            create_cmd.extend(["--config", generated_config_path])
 
         try:
             _kind_run(create_cmd, args.container_engine, check=True)
         finally:
-            os.unlink(config_path)
+            if generated_config_path:
+                os.unlink(generated_config_path)
     else:
-        if args.kubelet_verbosity is not None or args.containerd_loglevel:
+        if external_config is None and (args.kubelet_verbosity is not None or args.containerd_loglevel):
             print(f"Note: --kubelet-verbosity and --containerd-loglevel require cluster recreation (use --recreate).")
 
     if args.kubeconfig:
@@ -127,4 +139,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

@@ -51,6 +51,11 @@ PYTHON_TEST_SUITES = [
         "dir": os.path.join("dev", "ci", "presubmits", "shared"),
     },
     {
+        "name": "dev-ci-shared",
+        # Standard-library-only tests for shared CI helpers (gvisor provisioning).
+        "dir": os.path.join("dev", "ci", "shared"),
+    },
+    {
         "name": "hermes-agent",
         # chat_hermes.py only uses stdlib (urllib.request, json), so the test
         # needs no requirements.txt -- just pytest, installed unconditionally

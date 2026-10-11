@@ -80,9 +80,25 @@ class TestRunner:
                 time.sleep(retry_delay_seconds)
         return result
 
+    def _create_kind_cluster_cmd(self, args):
+        """Build the create-kind-cluster command, honoring KIND_CONFIG when set."""
+        cmd = [
+            f"{self.repo_root}/dev/tools/create-kind-cluster",
+            self.name,
+            "--recreate",
+            "--kubeconfig",
+            f"{self.repo_root}/bin/KUBECONFIG",
+        ]
+        kind_config = getattr(args, "kind_config", None) or os.environ.get("KIND_CONFIG")
+        if kind_config:
+            if not os.path.isabs(kind_config):
+                kind_config = os.path.join(self.repo_root, kind_config)
+            cmd.extend(["--config", kind_config])
+        return cmd
+
     def setup_cluster(self, args, extra_push_images_args=None):
         image_tag = os.environ["IMAGE_TAG"]
-        result = self.run_with_retry([f"{self.repo_root}/dev/tools/create-kind-cluster", self.name, "--recreate", "--kubeconfig", f"{self.repo_root}/bin/KUBECONFIG"])
+        result = self.run_with_retry(self._create_kind_cluster_cmd(args))
         if result.returncode != 0:
             return result
 
