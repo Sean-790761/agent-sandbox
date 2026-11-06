@@ -187,7 +187,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			r.Body = http.MaxBytesReader(w, r.Body, h.cfg.MaxRequestBodyBytes)
 		}
 	}
-	upstreamPath, upstreamRawPath := r.URL.Path, ""
+	upstreamPath, upstreamRawPath := r.URL.Path, r.URL.RawPath
 	var pathRouted bool
 	target, perr := h.resolveTarget(r, grpcRequest, &upstreamPath, &upstreamRawPath, &pathRouted)
 	if perr != nil {
@@ -247,14 +247,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	target0 := target // capture for closures
 	upstreamURL, src, resolved := target0.Resolve("http", h.cfg.ClusterDomain, upstreamPath, r.URL.RawQuery, h.cache)
 	if upstreamRawPath != "" {
-		// Only ever set for a path-routed request (see resolveTarget).
-		// Target.Resolve only assigns URL.Path, so without this a path-
-		// routed request carrying an encoded separator in its upstream
-		// portion (e.g. a filename containing "/", sent as "%2F") would
-		// reach the sandbox already decoded, silently renaming the
-		// resource it addresses. net/url only honors RawPath when it is
-		// a valid encoding of Path (see url.URL.EscapedPath's doc) —
-		// resolveTarget/ParsePathRoute guarantee that pairing holds.
+		// Preserve encoded separators and dot segments so the upstream
+		// routes the same resource the caller requested. EscapedPath falls
+		// back to escaping Path if RawPath is not a valid encoding of it.
 		upstreamURL.RawPath = upstreamRawPath
 	}
 
@@ -484,9 +479,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // resolveTarget parses the routing Target for r, preferring the path-based
 // form when --path-routing-prefix is configured and r.URL.EscapedPath()
-// matches it, and falling through to X-Sandbox-* headers otherwise —
-// byte-identical to the header parsing this replaced when the prefix is
-// unset (the default), so header-only deployments are unaffected.
+// matches it, and falling through to X-Sandbox-* headers otherwise.
 //
 // On a path match, *upstreamPath and *upstreamRawPath are rewritten to the
 // portion of the path the upstream sandbox should actually see
@@ -494,9 +487,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // originally-escaped form — both are needed together to preserve an
 // encoded separator (e.g. "%2F") through to the outbound request, see
 // ParsePathRoute. Both are left untouched for header-routed requests,
-// which carry no routing prefix to strip; *upstreamRawPath in particular
-// stays "" there, exactly matching pre-path-routing behavior of never
-// setting Resolve's outbound URL.RawPath at all.
+// which carry no routing prefix to strip.
 //
 // *pathRouted reports which branch actually resolved the target — the
 // browser-session bootstrap (maybeBootstrapCookie) must only fire for a

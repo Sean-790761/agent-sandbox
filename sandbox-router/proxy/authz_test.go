@@ -301,6 +301,7 @@ func TestScopedTokenV2BindsTheForwardedHeaderRoutedPath(t *testing.T) {
 		requestPath     string
 		requestRawPath  string
 		tokenPath       string
+		wantStatus      int
 		wantRequestPath string
 	}{
 		{
@@ -308,27 +309,53 @@ func TestScopedTokenV2BindsTheForwardedHeaderRoutedPath(t *testing.T) {
 			requestPath:     "/x%zz",
 			requestRawPath:  "/x%25zz",
 			tokenPath:       "/x%25zz",
+			wantStatus:      http.StatusNoContent,
 			wantRequestPath: "/x%25zz",
 		},
 		{
-			name:            "encoded slash follows header routing semantics",
+			name:            "encoded slash is preserved",
 			requestPath:     "/x/y",
 			requestRawPath:  "/x%2Fy",
-			tokenPath:       "/x/y",
-			wantRequestPath: "/x/y",
+			tokenPath:       "/x%2Fy",
+			wantStatus:      http.StatusNoContent,
+			wantRequestPath: "/x%2Fy",
 		},
 		{
-			name:            "lowercase escapes become canonical",
+			name:           "decoded slash token is rejected",
+			requestPath:    "/x/y",
+			requestRawPath: "/x%2Fy",
+			tokenPath:      "/x/y",
+			wantStatus:     http.StatusForbidden,
+		},
+		{
+			name:            "encoded dot segment is preserved",
+			requestPath:     "/v1/files/./a.txt",
+			requestRawPath:  "/v1/files/%2E%2Fa.txt",
+			tokenPath:       "/v1/files/%2E%2Fa.txt",
+			wantStatus:      http.StatusNoContent,
+			wantRequestPath: "/v1/files/%2E%2Fa.txt",
+		},
+		{
+			name:           "decoded dot segment token is rejected",
+			requestPath:    "/v1/files/./a.txt",
+			requestRawPath: "/v1/files/%2E%2Fa.txt",
+			tokenPath:      "/v1/files/./a.txt",
+			wantStatus:     http.StatusForbidden,
+		},
+		{
+			name:            "lowercase escapes match the canonical token path",
 			requestPath:     "/café",
 			requestRawPath:  "/caf%c3%a9",
 			tokenPath:       "/caf%C3%A9",
-			wantRequestPath: "/caf%C3%A9",
+			wantStatus:      http.StatusNoContent,
+			wantRequestPath: "/caf%c3%a9",
 		},
 		{
 			name:            "malformed raw escape becomes a literal percent",
 			requestPath:     "/x%ZZ",
 			requestRawPath:  "/x%ZZ",
 			tokenPath:       "/x%25ZZ",
+			wantStatus:      http.StatusNoContent,
 			wantRequestPath: "/x%25ZZ",
 		},
 	}
@@ -394,11 +421,21 @@ func TestScopedTokenV2BindsTheForwardedHeaderRoutedPath(t *testing.T) {
 			handler.ServeHTTP(response, req)
 			resp := response.Result()
 			defer resp.Body.Close()
-			if resp.StatusCode != http.StatusNoContent {
-				t.Fatalf("status: got %d want %d", resp.StatusCode, http.StatusNoContent)
+			if resp.StatusCode != test.wantStatus {
+				t.Fatalf("status: got %d want %d", resp.StatusCode, test.wantStatus)
 			}
-			if got := <-requests; got != test.wantRequestPath {
-				t.Fatalf("upstream request path: got %q want %q", got, test.wantRequestPath)
+			select {
+			case got := <-requests:
+				if test.wantStatus == http.StatusForbidden {
+					t.Fatalf("unauthorized request reached upstream: %q", got)
+				}
+				if got != test.wantRequestPath {
+					t.Fatalf("upstream request path: got %q want %q", got, test.wantRequestPath)
+				}
+			default:
+				if test.wantStatus == http.StatusNoContent {
+					t.Fatal("authorized request did not reach upstream")
+				}
 			}
 		})
 	}
